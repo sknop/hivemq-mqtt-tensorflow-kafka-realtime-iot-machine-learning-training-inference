@@ -6,7 +6,7 @@ You can also check out the 20min video recording with a live demo: [Streaming Ma
 
 There is also a blog post with more details about [use cases for event streaming and streaming analytics in the automotive industry](https://www.kai-waehner.de/blog/2019/11/22/apache-kafka-automotive-industry-industrial-iot-iiot/).
 
-## Movitation: Demo an IoT Scenario at Scale
+## Motivation: Demo an IoT Scenario at Scale
 
 You want to see an IoT example at huge scale? Not just 100 or 1000 devices producing data, but a really scalable demo with millions of messages per second from tens of thousands of devices?
 
@@ -15,6 +15,12 @@ This is the right demo for you! The demo shows how you can integrate with tens o
 ### Background: Cloud-Native MQTT and Kafka
 
 If you need more background about the challenges of building a scalable IoT infrastructure, the differences and relation between MQTT and Apache Kafka, and best practices for realizing a cloud-native IoT infrastructure based on Kubernetes, check out the slide deck "[Best Practices for Streaming IoT Data with MQTT and Apache Kafka](https://www.slideshare.net/KaiWaehner/best-practices-for-streaming-iot-data-with-mqtt-and-apache-kafka)".
+
+### Background: Digital Twin with Kafka
+
+In addition to the predictive maintenance scenario with machine learning, we also implemented an example of a Digital Twin. More thoughts on this here: "[Apache Kafka as Digital Twin for Open, Scalable, Reliable Industrial IoT (IIoT)](https://www.kai-waehner.de/blog/2019/11/28/apache-kafka-industrial-iot-iiot-build-an-open-scalable-reliable-digital-twin/)".
+
+In our example, we use Kafka as ingestion layer and MongoDB for storage and analytics. However, this is [just one of various IoT architectures for building a digital twin with Apache Kafka](https://www.kai-waehner.de/blog/2020/03/25/architectures-digital-twin-digital-thread-apache-kafka-iot-platforms-machine-learning).
 
 ## Use Case: Anomaly Detection in Real Time for 100000+ Connected Cars
 
@@ -36,6 +42,10 @@ We built two different analytic models using different approaches:
 - Unsupervised learning (used by default in our project): An Autoencoder neural network is trained to detect anomaly detection without any labeled data.
 
 - Supervised learning: A LSTM neural network is trained on labeled data to be able to do predictions about future sensor events.
+
+The [digital twin implementation with Kafka and MongoDB is discussed on its own page](infrastructure/kafka-connect/mongodb/README.md), including implementation details and configuration examples.
+
+Another example demonstrates how you can [store all sensor data in a data lake - in this case GCP Google Cloud Storage (GCS)](infrastructure/kafka-connect/gcs/README.md) - for further analytics.
 
 ## Architecture
 
@@ -112,7 +122,8 @@ Optional steps (nice to have)
 - Monitoring of model training (via TensorBoard) and model deployment / inference (via some kind of Kafka integration + dashboard technology)
 - Confluent Cloud for Kafka as a Service (-> Focus on business problems, not running infrastructure)
 - Enhance demo with C / librdkafka clients and TensorFlow Lite for edge computing
-- todo - other ideas?
+- Add Confluent Tiered storage as cost-efficient long-term storage
+- TODO - other ideas?
 
 ## Why is Streaming Machine Learning so awesome
 
@@ -120,7 +131,7 @@ Again, you don't need another data store anymore! Just ingest the data directly 
 
 ![Model Training from the distributed commit log of Apache Kafka leveraging TensorFlow I/O](pictures/Kafka_Commit_Log_Model_Training_with_TensorFlow_IO.png)
 
-This totally simplfies your architecture as you don't need another data store in the middle.
+This totally simplfies your architecture as you don't need another data store in the middle. In conjunction with Tiered Storage - a Confluent add-on to Apache Kafka, you can built a cost-efficient long-term storage (aka data lake) with Kafka. No need for HDFS or S3 as additional storage. See the blog post "[Streaming Machine Learning with Tiered Storage and Without a Data Lake](https://www.confluent.io/blog/streaming-machine-learning-with-tiered-storage/)" for more details.
 
 ## Be aware: This is still NOT Online Training
 
@@ -154,6 +165,7 @@ With default configuration, the demo starts at small scale. This is sufficient t
 Afterwards, you execute one single command to set up the infrastructure and one command to generate test data. Of course, you can configure everything to your needs (like the cluster size, test data, etc).
 
 Follow the instructions in the [quick start](infrastructure/README.md) to setup the cluster.
+Please let us know if you have any problems setting up the demo so that we can fix it!
 
 ### Streaming Machine Learning with Kafka and TensorFlow
 

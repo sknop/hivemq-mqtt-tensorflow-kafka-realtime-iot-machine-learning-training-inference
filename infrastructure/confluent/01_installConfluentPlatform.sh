@@ -4,167 +4,142 @@ set -e
 # set current directory of script
 MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-until gcloud container clusters list --zone europe-west1-b | grep 'RUNNING' >/dev/null 2>&1; do
-    echo "kubeapi not available yet..."
-    sleep 3
-done
-
 echo "Deploying prometheus..."
 # Make sure the tiller change is rolled out
-kubectl rollout status -n kube-system deployment tiller-deploy
+# kubectl rollout status -n kube-system deployment tiller-deploy
 # Commented next command, please do a helm repo update before executing terraform
-# helm repo update
+helm repo update
+kubectl create namespace monitoring || true
 
-# Make upgrade idempotent by first deleting all the CRDs (the helm chart will error otherwise)
-kubectl delete crd alertmanagers.monitoring.coreos.com podmonitors.monitoring.coreos.com prometheuses.monitoring.coreos.com prometheusrules.monitoring.coreos.com servicemonitors.monitoring.coreos.com 2>/dev/null || true
-helm delete --purge prom 2>/dev/null || true
-helm install --namespace monitoring --replace --name prom --version 6.8.1 stable/prometheus-operator --wait
-
-echo "Deploying metrics server..."
-helm upgrade --install metrics stable/metrics-server --version 2.8.4 --wait --force || true
+helm delete prometheus -n monitoring 2>/dev/null || true
+helm install --replace --atomic prometheus --version 8.5.14 stable/prometheus-operator -n monitoring --wait
 
 echo "Deploying K8s dashboard..."
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.0.0-beta4/aio/deploy/recommended.yaml
-
-echo "Kubernetes Dashboard token:"
-gcloud config config-helper --format=json | jq -r '.credential.access_token'
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.0.0-rc2/aio/deploy/recommended.yaml
 
 echo "Download Confluent Operator"
 # check if Confluent Operator still exist
 DIR="confluent-operator/"
-if [ -d "$DIR" ]; then
+if [[ -d "$DIR" ]]; then
   # Take action if $DIR exists. #
   echo "Operator is installed..."
   cd confluent-operator/
 else
   mkdir confluent-operator
   cd confluent-operator/
-  wget https://platform-ops-bin.s3-us-west-1.amazonaws.com/operator/confluent-operator-20190912-v0.65.1.tar.gz
-  tar -xvf confluent-operator-20190912-v0.65.1.tar.gz
-  rm confluent-operator-20190912-v0.65.1.tar.gz
+  # CP 5.3
+  #wget https://platform-ops-bin.s3-us-west-1.amazonaws.com/operator/confluent-operator-20190912-v0.65.1.tar.gz
+  #tar -xvf confluent-operator-20190912-v0.65.1.tar.gz
+  #rm confluent-operator-20190912-v0.65.1.tar.gz
+  # CP 5.4
+  wget https://platform-ops-bin.s3-us-west-1.amazonaws.com/operator/confluent-operator-20200115-v0.142.1.tar.gz
+  tar -xvf confluent-operator-20200115-v0.142.1.tar.gz
+  rm confluent-operator-20200115-v0.142.1.tar.gz
+
   cp ${MYDIR}/gcp.yaml helm/providers/
 fi
 
 cd helm/
 
-echo "Install Confluent Operator"
-#helm delete --purge operator
-helm install \
--f ${MYDIR}/gcp.yaml \
---name operator \
+# Install CP 5.4 cluster
+#../scripts/operator-util.sh -n operator -r co1 -f providers/gcp.yaml
+#../scripts/operator-util.sh -n operator -f providers/gcp.yaml
+
+# kubectl rollout status sts -n operator controlcenter
+#kubectl get pods -n operator
+
+# or one by one
+#prepare Confluent Operator installation
+kubectl create namespace operator || true
+# Operator
+helm upgrade --install \
+operator \
+./confluent-operator -f \
+${MYDIR}/gcp.yaml \
 --namespace operator \
---set operator.enabled=true \
-./confluent-operator || true
+--set operator.enabled=true
 echo "After Operator Installation: Check all pods..."
 kubectl get pods -n operator
 kubectl rollout status deployment -n operator cc-operator
-kubectl rollout status deployment -n operator cc-manager
+kubectl get crd | grep confluent
 
-echo "Patch the Service Account so it can pull Confluent Platform images"
-kubectl -n operator patch serviceaccount default -p '{"imagePullSecrets": [{"name": "confluent-docker-registry" }]}'
-
-echo "Install Confluent Zookeeper"
-#helm delete --purge zookeeper
-helm install \
--f ${MYDIR}/gcp.yaml \
---name zookeeper \
+# Zookeeper
+helm upgrade --install \
+zookeeper \
+./confluent-operator -f \
+${MYDIR}/gcp.yaml \
 --namespace operator \
---set zookeeper.enabled=true \
-./confluent-operator || true
+--set zookeeper.enabled=true
+
 echo "After Zookeeper Installation: Check all pods..."
 kubectl get pods -n operator
 sleep 10
 kubectl rollout status sts -n operator zookeeper
 
-
-
-echo "Install Confluent Kafka"
-#helm delete --purge kafka
-helm install \
--f ${MYDIR}/gcp.yaml \
---name kafka \
+# kafka
+helm upgrade --install \
+kafka \
+./confluent-operator -f \
+${MYDIR}/gcp.yaml \
 --namespace operator \
---set kafka.enabled=true \
-./confluent-operator || true
+--set kafka.enabled=true
+
 echo "After Kafka Broker Installation: Check all pods..."
 kubectl get pods -n operator
 sleep 10
 kubectl rollout status sts -n operator kafka
 
 
-echo "Install Confluent Schema Registry"
-#helm delete --purge schemaregistry
-helm install \
--f ${MYDIR}/gcp.yaml \
---name schemaregistry \
+# Schema Registry
+helm upgrade --install \
+schemaregistry \
+./confluent-operator -f \
+${MYDIR}/gcp.yaml \
 --namespace operator \
---set schemaregistry.enabled=true \
-./confluent-operator || true
+--set schemaregistry.enabled=true
+
 echo "After Schema Registry Installation: Check all pods..."
 kubectl get pods -n operator
 sleep 10
 kubectl rollout status sts -n operator schemaregistry
 
-
-echo "Install Confluent KSQL"
-# helm delete --purge ksql
-helm install \
--f ${MYDIR}/gcp.yaml \
---name ksql \
+# Kafka Connect
+helm upgrade --install \
+connect \
+./confluent-operator -f \
+${MYDIR}/gcp.yaml \
 --namespace operator \
---set ksql.enabled=true \
-./confluent-operator || true
+--set connect.enabled=true
+
+echo "After Kafka Connect Installation: Check all pods..."
+kubectl get pods -n operator
+sleep 10
+kubectl rollout status sts -n operator connect
+
+# ksql
+helm upgrade --install \
+ksql \
+./confluent-operator -f \
+${MYDIR}/gcp.yaml \
+--namespace operator \
+--set ksql.enabled=true
+
 echo "After KSQL Installation: Check all pods..."
 kubectl get pods -n operator
 sleep 10
 kubectl rollout status sts -n operator ksql
 
-echo "Install Confluent Control Center"
-# helm delete --purge controlcenter
-helm install \
--f ${MYDIR}/gcp.yaml \
---name controlcenter \
+# C3
+helm upgrade --install \
+controlcenter \
+./confluent-operator -f \
+${MYDIR}/gcp.yaml \
 --namespace operator \
---set controlcenter.enabled=true \
-./confluent-operator || true
+--set controlcenter.enabled=true
+
 echo "After Control Center Installation: Check all pods..."
 kubectl get pods -n operator
 sleep 10
-kubectl rollout status sts -n operator controlcenter
-
-# TODO Build breaks if we don't wait here until all components are ready. Is there a better solution for a check?
-sleep 200
-
-echo "Create LB for KSQL"
-helm upgrade -f ${MYDIR}/gcp.yaml \
- --set ksql.enabled=true \
- --set ksql.loadBalancer.enabled=true \
- --set ksql.loadBalancer.domain=mydevplatform.gcp.cloud ksql \
- ./confluent-operator
- kubectl rollout status sts -n operator ksql
-
-echo "Create LB for Kafka"
-helm upgrade -f ${MYDIR}/gcp.yaml \
- --set kafka.enabled=true \
- --set kafka.loadBalancer.enabled=true \
- --set kafka.loadBalancer.domain=mydevplatform.gcp.cloud kafka \
- ./confluent-operator
- kubectl rollout status sts -n operator kafka
-
-echo "Create LB for Schemaregistry"
-helm upgrade -f ${MYDIR}/gcp.yaml \
- --set schemaregistry.enabled=true \
- --set schemaregistry.loadBalancer.enabled=true \
- --set schemaregistry.loadBalancer.domain=mydevplatform.gcp.cloud schemaregistry \
- ./confluent-operator
- kubectl rollout status sts -n operator schemaregistry
-
-echo "Create LB for Control Center"
-helm upgrade -f ${MYDIR}/gcp.yaml \
- --set controlcenter.enabled=true \
- --set controlcenter.loadBalancer.enabled=true \
- --set controlcenter.loadBalancer.domain=mydevplatform.gcp.cloud controlcenter \
- ./confluent-operator
 kubectl rollout status sts -n operator controlcenter
 
 echo " Loadbalancers are created please wait a couple of minutes..."
@@ -181,7 +156,7 @@ echo "EXTERNAL-IP  b2.mydevplatform.gcp.cloud kafka-2-lb kafka-2 b2"
 echo "EXTERNAL-IP  kafka.mydevplatform.gcp.cloud kafka-bootstrap-lb kafka"
 kubectl get services -n operator | grep LoadBalancer
 sleep 10
-
+     
 echo "After Load balancer Deployments: Check all Confluent Services..."
 kubectl get services -n operator
 kubectl get pods -n operator
